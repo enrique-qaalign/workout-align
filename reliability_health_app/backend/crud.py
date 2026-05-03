@@ -142,27 +142,35 @@ def get_latest_consent(db: Session, user_id: int) -> Optional[models.Consent]:
     )
 
 
-def compute_readiness_state(db: Session, user_id: int) -> str:
-    """Compute a readiness state based on HRV, resting heart rate and sleep.
+def _readiness_recommendation(state: str) -> str:
+    if state == "red":
+        return "Recovery priority. Walk, mobility, hydration, and sleep protection today."
+    if state == "yellow":
+        return "Train, but reduce intensity. Avoid max-effort lifts or high-fatigue conditioning."
+    return "Proceed with planned training. Strength and Zone 2 are acceptable today."
 
-    The algorithm calculates 7‑day averages for HRV, resting heart
-    rate (RHR) and sleep metrics. It then determines personal
-    baselines from the user's stored preferences (if available) or
-    falls back to 30‑day averages. Deviations from baseline are
-    computed as a percentage. A large negative deviation in HRV or
-    sleep—or a large positive deviation in RHR—indicates reduced
-    readiness.
 
-    Thresholds:
-      * deviation > 0.2 → red (significant stress or fatigue)
-      * deviation > 0.1 → yellow (moderate stress)
-      * otherwise → green
+def compute_readiness_detail(db: Session, user_id: int) -> dict:
+    """Return an explainable readiness decision payload.
+
+    The API layer should not know about intermediate scoring variables.
+    This function owns the calculation and returns the decision state,
+    score, deviations, drivers, and recommended action as one contract.
     """
     user = get_user(db, user_id)
     if not user:
-        return "green"
+        state = "green"
+        return {
+            "user_id": user_id,
+            "readiness_state": state,
+            "score": 0,
+            "hrv_dev": 0.0,
+            "rhr_dev": 0.0,
+            "sleep_dev": 0.0,
+            "drivers": ["User not found; defaulting to green"],
+            "recommendation": _readiness_recommendation(state),
+        }
 
-    # Fetch 7‑day and 30‑day telemetry for HRV, RHR and Sleep
     hrv_7 = get_telemetry_by_user(db, user_id, metric_type="HRV", days=7)
     hrv_30 = get_telemetry_by_user(db, user_id, metric_type="HRV", days=30)
     rhr_7 = get_telemetry_by_user(db, user_id, metric_type="RHR", days=7)
@@ -177,56 +185,83 @@ def compute_readiness_state(db: Session, user_id: int) -> str:
     avg_sleep_7 = calculate_rolling_average(sleep_7)
     avg_sleep_30 = calculate_rolling_average(sleep_30)
 
-    # Determine baselines: use user-defined baselines if present; otherwise 30‑day average
     baseline_hrv = user.baseline_hrv or avg_hrv_30 or avg_hrv_7
     baseline_rhr = user.baseline_rhr or avg_rhr_30 or avg_rhr_7
     baseline_sleep = avg_sleep_30 or avg_sleep_7
 
-    if baseline_hrv == 0 or baseline_rhr == 0 or baseline_sleep == 0:
-        return "green"
-    
-
-    # Deviations: negative values for HRV and sleep (lower than baseline) indicate fatigue; positive values for RHR (higher than baseline) indicate stress.
     if not hrv_7 or not rhr_7 or not sleep_7:
-        return "green"
+        state = "green"
+        return {
+            "user_id": user_id,
+            "readiness_state": state,
+            "score": 0,
+            "hrv_dev": 0.0,
+            "rhr_dev": 0.0,
+            "sleep_dev": 0.0,
+            "drivers": ["Insufficient 7-day telemetry; defaulting to green"],
+            "recommendation": _readiness_recommendation(state),
+        }
+
     if not baseline_hrv or not baseline_rhr or not baseline_sleep:
-        return "green"
+        state = "green"
+        return {
+            "user_id": user_id,
+            "readiness_state": state,
+            "score": 0,
+            "hrv_dev": 0.0,
+            "rhr_dev": 0.0,
+            "sleep_dev": 0.0,
+            "drivers": ["Insufficient baseline data; defaulting to green"],
+            "recommendation": _readiness_recommendation(state),
+        }
+
     hrv_dev = (baseline_hrv - avg_hrv_7) / baseline_hrv
     rhr_dev = (avg_rhr_7 - baseline_rhr) / baseline_rhr
     sleep_dev = (baseline_sleep - avg_sleep_7) / baseline_sleep
 
-
-    # Choose the worst deviation. Only positive deviations matter; negative rhr_dev indicates lower RHR which is positive.
-    deviations = [d for d in (hrv_dev, rhr_dev, sleep_dev) if d > 0]
     score = 0
+    drivers = []
 
-    # HRV (most important)
-    if hrv_dev > 0.1:
+    if hrv_dev > 0.10:
         score += 2
+        drivers.append("HRV suppressed more than 10% from baseline")
     elif hrv_dev > 0.05:
         score += 1
+        drivers.append("HRV mildly suppressed from baseline")
 
-    # RHR
-    if rhr_dev > 0.1:
+    if rhr_dev > 0.10:
         score += 2
+        drivers.append("Resting heart rate elevated more than 10% from baseline")
     elif rhr_dev > 0.05:
         score += 1
+        drivers.append("Resting heart rate mildly elevated from baseline")
 
-    # Sleep
-    if sleep_dev > 0.1:
+    if sleep_dev > 0.10:
         score += 2
+        drivers.append("Sleep reduced more than 10% from baseline")
     elif sleep_dev > 0.05:
         score += 1
-    print({
-        "hrv_dev": hrv_dev,
-        "rhr_dev": rhr_dev,
-        "sleep_dev": sleep_dev,
-        "score": score
-        })
+        drivers.append("Sleep mildly reduced from baseline")
 
     if score >= 4:
-        return "red"
+        state = "red"
     elif score >= 2:
-        return "yellow"
+        state = "yellow"
     else:
-        return "green"
+        state = "green"
+
+    return {
+        "user_id": user_id,
+        "readiness_state": state,
+        "score": score,
+        "hrv_dev": round(hrv_dev, 3),
+        "rhr_dev": round(rhr_dev, 3),
+        "sleep_dev": round(sleep_dev, 3),
+        "drivers": drivers,
+        "recommendation": _readiness_recommendation(state),
+    }
+
+
+def compute_readiness_state(db: Session, user_id: int) -> str:
+    """Backward-compatible readiness state helper."""
+    return compute_readiness_detail(db, user_id)["readiness_state"]
