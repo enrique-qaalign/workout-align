@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reliability Engineer for Health Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f7f7f7;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .section {
+            background-color: #fff;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+        }
+        input, select, button {
+            padding: 8px;
+            margin-top: 5px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background: #efefef;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Reliability Engineer for Health Dashboard</h1>
+
+    <div class="section" id="auth-section">
+        <h2>Authentication</h2>
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" placeholder="Email" />
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" placeholder="Password" />
+        <button onclick="login()">Login</button>
+        <pre id="auth-response"></pre>
+    </div>
+
+    <div class="section" id="user-section">
+        <h2>Create User</h2>
+        <label for="user-name">Name</label>
+        <input type="text" id="user-name" placeholder="Enter your name" />
+        <label for="user-email">Email</label>
+        <input type="email" id="user-email" placeholder="Enter your email" />
+        <label for="user-password">Password</label>
+        <input type="password" id="user-password" placeholder="Enter a password" />
+        <label for="user-baseline-hrv">Baseline HRV (optional)</label>
+        <input type="number" id="user-baseline-hrv" placeholder="Baseline HRV" step="0.01" />
+        <label for="user-baseline-rhr">Baseline RHR (optional)</label>
+        <input type="number" id="user-baseline-rhr" placeholder="Baseline RHR" step="0.01" />
+        <button onclick="createUser()">Create User</button>
+        <pre id="user-response"></pre>
+    </div>
+
+    <div class="section" id="telemetry-section">
+        <h2>Log Telemetry</h2>
+        <label for="telemetry-user-id">User ID</label>
+        <input type="number" id="telemetry-user-id" placeholder="User ID" />
+        <label for="metric-type">Metric Type</label>
+        <select id="metric-type">
+            <option value="HRV">HRV (ms)</option>
+            <option value="RHR">Resting Heart Rate (bpm)</option>
+            <option value="Sleep">Sleep (hours)</option>
+            <option value="SpO2">Oxygen Saturation (%)</option>
+        </select>
+        <label for="metric-value">Value</label>
+        <input type="number" id="metric-value" placeholder="Enter value" step="0.01" />
+        <button onclick="logTelemetry()">Submit Telemetry</button>
+        <pre id="telemetry-response"></pre>
+    </div>
+
+    <div class="section" id="meals-section">
+        <h2>Available Meal Templates</h2>
+        <button onclick="loadMeals()">Load Meals</button>
+        <pre id="meals-response"></pre>
+    </div>
+
+    <div class="section" id="readiness-section">
+        <h2>Check Readiness State</h2>
+        <label for="readiness-user-id">User ID</label>
+        <input type="number" id="readiness-user-id" placeholder="User ID" />
+        <button onclick="checkReadiness()">Get Readiness</button>
+        <pre id="readiness-response"></pre>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        // Auth token will be stored after login
+        let authToken = null;
+
+        async function login() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            const responseEl = document.getElementById('auth-response');
+            responseEl.textContent = 'Logging in...';
+            try {
+                const params = new URLSearchParams();
+                params.append('username', email);
+                params.append('password', password);
+                const res = await fetch(`${API_URL}/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString(),
+                });
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.detail || 'Login failed');
+                }
+                const data = await res.json();
+                authToken = data.access_token;
+                responseEl.textContent = 'Login successful!';
+            } catch (err) {
+                responseEl.textContent = err;
+            }
+        }
+
+        async function createUser() {
+            const name = document.getElementById('user-name').value;
+            const email = document.getElementById('user-email').value;
+            const password = document.getElementById('user-password').value;
+            const baselineHrvVal = document.getElementById('user-baseline-hrv').value;
+            const baselineRhrVal = document.getElementById('user-baseline-rhr').value;
+            const baseline_hrv = baselineHrvVal ? parseFloat(baselineHrvVal) : undefined;
+            const baseline_rhr = baselineRhrVal ? parseFloat(baselineRhrVal) : undefined;
+            const responseEl = document.getElementById('user-response');
+            responseEl.textContent = 'Sending...';
+            try {
+                const payload = { name, email, password };
+                if (baseline_hrv !== undefined) payload.baseline_hrv = baseline_hrv;
+                if (baseline_rhr !== undefined) payload.baseline_rhr = baseline_rhr;
+                const res = await fetch(`${API_URL}/users/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                responseEl.textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                responseEl.textContent = err;
+            }
+        }
+
+        async function logTelemetry() {
+            const userId = parseInt(document.getElementById('telemetry-user-id').value);
+            const metricType = document.getElementById('metric-type').value;
+            const value = parseFloat(document.getElementById('metric-value').value);
+            const responseEl = document.getElementById('telemetry-response');
+            responseEl.textContent = 'Sending...';
+            try {
+                const res = await fetch(`${API_URL}/telemetry/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...(authToken ? { 'Authorization': 'Bearer ' + authToken } : {}) },
+                    body: JSON.stringify({ user_id: userId, metric_type: metricType, value })
+                });
+                const data = await res.json();
+                responseEl.textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                responseEl.textContent = err;
+            }
+        }
+
+        async function loadMeals() {
+            const responseEl = document.getElementById('meals-response');
+            responseEl.textContent = 'Loading...';
+            try {
+                const res = await fetch(`${API_URL}/meals/`, {
+                    headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {}
+                });
+                const data = await res.json();
+                responseEl.textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                responseEl.textContent = err;
+            }
+        }
+
+        async function checkReadiness() {
+            const userId = parseInt(document.getElementById('readiness-user-id').value);
+            const responseEl = document.getElementById('readiness-response');
+            responseEl.textContent = 'Computing...';
+            try {
+                const res = await fetch(`${API_URL}/readiness/${userId}`, {
+                    headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {}
+                });
+                const data = await res.json();
+                responseEl.textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                responseEl.textContent = err;
+            }
+        }
+    </script>
+</body>
+</html>
