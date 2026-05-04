@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local database
+health_app.db
+*.db
+
+# Node / Vite
+frontend-react/node_modules/
+frontend-react/dist/
+
+# OS/editor
+.DS_Store
+.vscode/

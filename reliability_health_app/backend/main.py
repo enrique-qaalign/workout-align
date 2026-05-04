@@ -31,8 +31,10 @@ app = FastAPI(title="Reliability Engineer for Health API", version="0.1")
 origins = [
     "http://localhost",
     "http://localhost:3000",
+    "http://localhost:5173",
     "http://127.0.0.1",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
 ]
 
 app.add_middleware(
@@ -273,8 +275,7 @@ def get_readiness_state(
 ):
     if current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to view readiness for another user")
-    state = crud.compute_readiness_state(db, user_id=user_id)
-    return {"user_id": user_id, "readiness_state": state}
+    return crud.compute_readiness_detail(db, user_id=user_id)
 
 
 # Trend endpoint (rolling averages)
@@ -285,7 +286,7 @@ def get_trends(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Return the 7‑day and 30‑day rolling averages for a given metric."""
+    """Return the 7-day and 30-day rolling averages for a given metric."""
     if current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to view trends for another user")
     records_7 = crud.get_telemetry_by_user(db, user_id=user_id, metric_type=metric_type, days=7)
